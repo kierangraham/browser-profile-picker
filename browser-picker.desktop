@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Browser picker
+Comment=Choose the Chromium profile for each new window and link
+Exec=browser-picker %u
+Icon=chromium
+Terminal=false
+NoDisplay=true
+Categories=Network;WebBrowser;
+MimeType=text/html;text/xml;application/xhtml+xml;x-scheme-handler/http;x-scheme-handler/https;

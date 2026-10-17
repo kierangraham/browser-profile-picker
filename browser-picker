@@ -1,0 +1,128 @@
+#!/bin/bash
+# browser-picker: choose the Chromium profile for a new window or a link.
+#
+#   browser-picker [URL]              show the picker (Omarchy shell overlay)
+#   browser-picker --open ID [URL]    open in the choice with this id
+#   browser-picker --private [URL]    open the private choice without asking
+#   browser-picker --list             print the choices as JSON
+#
+# The choices come from ~/.config/browser-picker/profiles.json if it lists any.
+# Otherwise they are the profiles in Chromium's Local State file, plus Private.
+# Installed as the default web browser, so Omarchy's Super+Shift+Return
+# (omarchy-launch-browser) and links from other apps both arrive here.
+# If the shell cannot show the picker, the link still opens in Chromium.
+
+set -euo pipefail
+
+config=${BROWSER_PICKER_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/browser-picker/profiles.json}
+
+# A top-level string from the config file, or the fallback.
+setting() {
+  local value=""
+  if [[ -f $config ]]; then
+    value=$(jq -r --arg key "$1" '.[$key] // empty' "$config")
+  fi
+  echo "${value:-$2}"
+}
+
+browser=$(setting browser /usr/bin/chromium)
+user_data_dir=$(setting userDataDir "${XDG_CONFIG_HOME:-$HOME/.config}/chromium")
+
+# Chromium's own profiles, in its menu order, then Private.
+# Private has no profile, so Chromium uses the last profile you used.
+chromium_profiles() {
+  local state="$user_data_dir/Local State"
+  local profiles='[{"label": "Chromium", "profile": "Default"}]'
+  if [[ -f $state ]]; then
+    profiles=$(jq -c '.profile as $p
+      | ($p.profiles_order // ($p.info_cache | keys))
+      | map(select($p.info_cache[.] != null) | {label: $p.info_cache[.].name, profile: .})' "$state")
+  fi
+  jq -c '. + [{label: "Private", key: "i", incognito: true}]' <<<"$profiles"
+}
+
+# Every choice with its id, label, shortcut key, profile and icon filled in.
+# Without a key, a choice takes the first letter of its label if it is free.
+choices() {
+  local raw
+  if [[ -f $config ]] && jq -e '.choices | length > 0' "$config" >/dev/null; then
+    raw=$(jq -c '.choices' "$config")
+  else
+    raw=$(chromium_profiles)
+  fi
+  jq -c --arg home "$HOME" '
+    def slug: ascii_downcase | gsub("[^a-z0-9]+"; "-") | ltrimstr("-") | rtrimstr("-");
+    reduce .[] as $c ({used: map(.key // empty), out: []};
+      ($c.label // $c.profile // "Chromium") as $label
+      | (if $c.key then $c.key
+         else ($label[0:1] | ascii_downcase) as $k
+         | if ($k | test("^[a-z]$")) and ((.used | index($k)) == null) then $k else null end
+         end) as $key
+      | .used += [$key // empty]
+      | .out += [{
+          id: ($c.id // ($label | slug)),
+          label: $label,
+          key: $key,
+          profile: ($c.profile // null),
+          incognito: ($c.incognito // false),
+          icon: (($c.icon // null) | if . then sub("^~"; $home) else null end),
+          glyph: ($c.glyph // (if $c.incognito then "\udb81\uddf9" else "\uf268" end))
+        }])
+    | .out' <<<"$raw"
+}
+
+launch() {
+  # Like omarchy-launch-browser: its own unit, so it outlives whoever asked.
+  # Chromium would otherwise offer to take back the default-browser role.
+  systemd-run --user --quiet --collect --unit="browser-picker-$(date +%s%N)" \
+    --property=StandardOutput=null --property=StandardError=null \
+    uwsm-app -- "$browser" --no-default-browser-check "$@"
+}
+
+open_choice() {
+  local choice=$1
+  shift
+  local args=() profile
+  profile=$(jq -r '.profile // empty' <<<"$choice")
+  if [[ -n $profile ]]; then
+    args+=("--profile-directory=$profile")
+  fi
+  if [[ $(jq -r '.incognito' <<<"$choice") == true ]]; then
+    args+=(--incognito)
+  fi
+  launch "${args[@]}" "$@"
+}
+
+case ${1:-} in
+  -h | --help)
+    sed -n '2,13s/^# \{0,1\}//p' "$0"
+    ;;
+  --list)
+    choices | jq .
+    ;;
+  --open)
+    id=${2:?usage: browser-picker --open ID [URL]}
+    shift 2
+    choice=$(choices | jq -c --arg id "$id" 'map(select(.id == $id))[0] // empty')
+    [[ -n $choice ]] || { echo "browser-picker: no choice with id '$id' (see browser-picker --list)" >&2; exit 2; }
+    open_choice "$choice" "$@"
+    ;;
+  --private | --incognito)
+    shift
+    choice=$(choices | jq -c 'map(select(.incognito))[0] // empty')
+    if [[ -n $choice ]]; then
+      open_choice "$choice" "$@"
+    else
+      launch --incognito "$@"
+    fi
+    ;;
+  *)
+    url=${1:-}
+    options=$(choices | jq -c 'map({id, label, key, icon, glyph} | with_entries(select(.value != null)))')
+    payload=$(jq -nc --arg url "$url" --argjson options "$options" '{url: $url, options: $options}')
+    # The shell answers "ok" when the overlay opened; anything else and Chromium decides.
+    if [[ $(timeout 3 omarchy-shell shell summon kierangraham.browser-picker "$payload" 2>/dev/null) != ok ]]; then
+      launch ${url:+"$url"}
+    fi
+    ;;
+esac

@@ -1,0 +1,115 @@
+#!/bin/bash
+# Checks the plugin, the choices and the install scripts without touching your
+# desktop: HOME is a temporary folder and the desktop commands are stubs.
+set -euo pipefail
+
+repo=$(cd "$(dirname "$0")/.." && pwd)
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+failures=0
+
+check() {
+  local name=$1
+  shift
+  if "$@"; then
+    echo "ok    $name"
+  else
+    echo "FAIL  $name"
+    failures=$((failures + 1))
+  fi
+}
+
+check "plugin validates" omarchy plugin validate "$repo"
+check "scripts parse" bash -n "$repo/browser-picker" "$repo/install" "$repo/uninstall"
+
+# Stubs: record what would run instead of running it.
+stubs=$tmp/stubs
+mkdir -p "$stubs"
+cat >"$stubs/systemd-run" <<'EOF'
+#!/bin/bash
+printf '%s\n' "$@" >"$HOME/launched"
+EOF
+cat >"$stubs/omarchy-shell" <<'EOF'
+#!/bin/bash
+[[ ${2:-} == summon ]] && { printf "%s" "${4:-}" >"$HOME/summoned"; echo "${STUB_SHELL_REPLY:-ok}"; }
+exit 0
+EOF
+cat >"$stubs/omarchy" <<'EOF'
+#!/bin/bash
+[[ $1 == plugin && $2 == validate ]] && exec omarchy-plugin-validate "$3"
+echo "$*" >>"$HOME/omarchy-calls"
+EOF
+cat >"$stubs/xdg-settings" <<'EOF'
+#!/bin/bash
+f=$HOME/default-browser
+if [[ $1 == set ]]; then echo "$3" >"$f"; else cat "$f" 2>/dev/null || echo chromium.desktop; fi
+EOF
+printf '#!/bin/bash\n' >"$stubs/update-desktop-database"
+chmod +x "$stubs"/*
+
+export HOME=$tmp/home XDG_CONFIG_HOME=$tmp/home/.config PATH=$stubs:$PATH
+unset BROWSER_PICKER_CONFIG
+mkdir -p "$HOME/.config/chromium"
+cat >"$HOME/.config/chromium/Local State" <<'EOF'
+{"profile": {"profiles_order": ["Default", "Profile 2"],
+  "info_cache": {"Default": {"name": "Work"}, "Profile 2": {"name": "Weekend"}}}}
+EOF
+picker=$repo/browser-picker
+
+check "choices come from Local State" \
+  test "$("$picker" --list | jq -c 'map([.id, .key, .profile])')" \
+  = '[["work","w","Default"],["weekend",null,"Profile 2"],["private","i",null]]'
+
+"$picker" --open weekend https://example.com
+check "--open passes the profile and URL" \
+  test "$(tail -3 "$HOME/launched" | paste -sd' ')" \
+  = "--no-default-browser-check --profile-directory=Profile 2 https://example.com"
+
+"$picker" --incognito
+check "--incognito opens the private choice" test "$(tail -1 "$HOME/launched")" = "--incognito"
+
+mkdir -p "$HOME/.config/browser-picker"
+cat >"$HOME/.config/browser-picker/profiles.json" <<'EOF'
+{"browser": "/usr/bin/chromium", "choices": [
+  {"label": "Personal", "profile": "Profile 1", "icon": "~/personal.svg"},
+  {"label": "Private", "profile": "Profile 1", "incognito": true, "key": "i"}]}
+EOF
+check "profiles.json replaces Local State" \
+  test "$("$picker" --list | jq -c 'map([.id, .key, .icon])')" \
+  = "[[\"personal\",\"p\",\"$HOME/personal.svg\"],[\"private\",\"i\",null]]"
+
+"$picker" --private
+check "--private uses the configured profile" \
+  test "$(tail -2 "$HOME/launched" | paste -sd' ')" = "--profile-directory=Profile 1 --incognito"
+
+"$picker" https://example.com/page
+check "the picker is summoned with the URL" \
+  test "$(jq -r '.url, (.options | length)' "$HOME/summoned" | paste -sd' ')" = "https://example.com/page 2"
+
+rm -f "$HOME/launched"
+STUB_SHELL_REPLY=busy "$picker" https://example.com/fallback
+check "without the shell the link still opens" test "$(tail -1 "$HOME/launched")" = "https://example.com/fallback"
+rm "$HOME/.config/browser-picker/profiles.json"
+
+"$repo/install" >/dev/null
+plugin=$HOME/.config/omarchy/plugins/kierangraham.browser-picker
+check "install copies the plugin" omarchy plugin validate "$plugin"
+check "install sets the default browser" test "$(xdg-settings get default-web-browser)" = browser-picker.desktop
+check "the desktop file runs the installed script" \
+  grep -qx "Exec=$HOME/.local/bin/browser-picker %u" "$HOME/.local/share/applications/browser-picker.desktop"
+
+"$repo/uninstall" >/dev/null
+check "uninstall restores the default browser" test "$(xdg-settings get default-web-browser)" = chromium.desktop
+check "uninstall removes the plugin and script" test ! -e "$plugin" -a ! -e "$HOME/.local/bin/browser-picker"
+
+# The `omarchy plugin add` route: the checkout is the plugin folder.
+mkdir -p "$plugin"
+tar -C "$repo" --exclude=.git -cf - . | tar -C "$plugin" -xf -
+git -C "$plugin" init -q
+"$plugin/install" >/dev/null
+check "install from the plugin folder" test -x "$HOME/.local/bin/browser-picker" -a -d "$plugin/.git"
+"$plugin/uninstall" >/dev/null
+check "uninstall from the plugin folder" test ! -e "$plugin"
+
+((failures == 0)) || { echo "$failures failed"; exit 1; }
+echo "All checks passed."

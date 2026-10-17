@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "kierangraham.browser-picker",
+  "name": "Browser picker",
+  "version": "0.2.0",
+  "author": "Kieran Graham",
+  "description": "Choose which Chromium profile opens a new window or link",
+  "kinds": [
+    "overlay"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "Picker.qml"
+  }
+}

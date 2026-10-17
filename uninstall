@@ -1,0 +1,21 @@
+#!/bin/bash
+# Remove the browser picker and restore the previous default web browser.
+# Your choices in ~/.config/browser-picker/ are kept.
+set -euo pipefail
+
+id=kierangraham.browser-picker
+state=$HOME/.local/state/browser-picker
+
+if [[ $(xdg-settings get default-web-browser) == browser-picker.desktop ]]; then
+  xdg-settings set default-web-browser "$(cat "$state/previous-default-browser" 2>/dev/null || echo chromium.desktop)"
+fi
+rm -rf "$state"
+rm -f "$HOME/.local/bin/browser-picker" "$HOME/.local/share/applications/browser-picker.desktop"
+update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
+
+# Last, because this script may live in the plugin folder it removes.
+omarchy plugin disable "$id" >/dev/null 2>&1 || true
+rm -rf "$HOME/.config/omarchy/plugins/$id"
+omarchy-shell -q shell rescanPlugins
+
+echo "Removed. Default browser: $(xdg-settings get default-web-browser)"

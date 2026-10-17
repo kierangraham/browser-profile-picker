@@ -1,0 +1,8 @@
+{
+  "browser": "/usr/bin/chromium",
+  "choices": [
+    { "label": "Work", "profile": "Default", "key": "w", "icon": "~/.local/share/icons/work.svg" },
+    { "label": "Personal", "profile": "Profile 1", "key": "p" },
+    { "label": "Private", "profile": "Profile 1", "incognito": true, "key": "i" }
+  ]
+}
