@@ -18,8 +18,7 @@ optdepends=(
   'xdg-utils: to make it the default web browser'
 )
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-# Update with `updpkgsums` once the v0.1.0 tag is published.
-sha256sums=('SKIP')
+sha256sums=('a8df844b583ea9daade06b737d71cfd5e627905e29a2ead7aa7200a5857b7bf1')
 
 package() {
   cd "$pkgname-$pkgver"
