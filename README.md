@@ -1,76 +1,126 @@
 # Browser profile picker
 
-An Omarchy overlay that asks which Chromium profile to use whenever a browser window or a link opens. It registers itself as the default web browser, so one change covers new windows and links from other apps.
+An Omarchy overlay that asks which Chromium profile should open each link and new browser window.
 
-![The picker asking which profile should open a github.com link](docs/picker-link.webp)
+[![The picker opening a link in a chosen profile, then asking again for a new window](docs/preview.webp)](https://kierangraham.com/media/promo/picker.mp4)
 
-## Requirements
+[Watch the film (25 s, with sound)](https://kierangraham.com/media/promo/picker.mp4)
 
-- **Omarchy** with the shell plugin API (`omarchy plugin` and `omarchy-shell`).
-- **Chromium.** Other Chromium-based browsers work if you set `browser` and `userDataDir` in the config.
-- **`jq`**, which Omarchy installs.
+It's for people who keep separate Chromium profiles, such as one for work and one for home. **The picker becomes your default web browser.** Links from other apps and new browser windows go through it, and it opens your choice in Chromium.
+
+It is built for [Omarchy](https://omarchy.org) and runs inside the Omarchy shell.
 
 ## Install
 
-The plugin and the default-browser setting are two steps. **`omarchy plugin add` installs only the overlay.** The `install` script then adds the `browser-picker` command and makes it the default browser.
+**You need Omarchy.** It already includes Chromium, `jq` and `uwsm`, which the picker uses.
+
+Installing takes three steps: the overlay, the `browser-picker` command, and the default-browser setting.
+
+**1. Add the overlay** with Omarchy's plugin manager:
 
 ```bash
 omarchy plugin add https://github.com/kierangraham/browser-profile-picker --enable
-~/.config/omarchy/plugins/kierangraham.browser-picker/install
 ```
 
-The `install` script:
+**2. Install the command.** The Arch package is the easiest route. It installs `browser-picker` and its desktop entry into `/usr`. **The package doesn't include the overlay,** because Omarchy manages its plugin folder itself.
 
-- copies `browser-picker` to `~/.local/bin`;
-- adds `browser-picker.desktop` to `~/.local/share/applications`;
-- enables the plugin if it isn't enabled yet;
-- saves your current default browser, then sets the picker as the default.
+```bash
+sudo pacman -S --needed base-devel
+git clone https://github.com/kierangraham/browser-profile-picker
+cd browser-profile-picker/packaging/arch
+makepkg -si
+```
 
-To install without changing the default browser, run `install --no-default`. Then try it with `browser-picker https://example.com`.
+Without a package, run `make install` from the clone instead. It installs into `~/.local`:
 
-**To update,** run `omarchy plugin update kierangraham.browser-picker`. Then run `install` again, because the update doesn't change the copy in `~/.local/bin`.
+```bash
+git clone https://github.com/kierangraham/browser-profile-picker
+cd browser-profile-picker
+make install
+```
 
-**From any other checkout,** `./install` is the only command you need. It also copies `manifest.json` and `Picker.qml` into `~/.config/omarchy/plugins/kierangraham.browser-picker/`. If that folder is already a git checkout from `omarchy plugin add`, it leaves the folder alone.
+**3. Make it the default browser.** Note the current default first, so you can switch back later:
 
-**To remove it,** run `uninstall` from the same folder. It restores the previous default browser and removes the plugin, the command and the desktop file. Your config file stays.
+```bash
+xdg-settings get default-web-browser
+xdg-settings set default-web-browser browser-picker.desktop
+```
+
+Test it by opening a link: `xdg-open https://example.com`.
+
+## Update
+
+Update the overlay:
+
+```bash
+omarchy plugin update kierangraham.browser-picker
+```
+
+Then update the command the same way you installed it. From your clone, either:
+
+- **Package:** run `git pull`, then `makepkg -si` in `packaging/arch`.
+- **`make install`:** run `git pull`, then `make install`.
+
+## Uninstall
+
+1. Restore your previous default browser. For Omarchy's Chromium:
+
+   ```bash
+   xdg-settings set default-web-browser chromium.desktop
+   ```
+
+2. Remove the overlay:
+
+   ```bash
+   omarchy plugin remove kierangraham.browser-picker
+   ```
+
+3. Remove the command. Use `sudo pacman -R browser-profile-picker` for the package, or `make uninstall` in your clone.
+
+**Your config in `~/.config/browser-picker/` stays.** Delete it by hand if you don't need it.
 
 ## Usage
 
-The picker appears in two cases:
+The picker opens in two cases:
 
-- **Super+Shift+Return** (or Super+Shift+B) runs Omarchy's `omarchy-launch-browser`, which runs the default browser. The picker opens with no URL, and your choice opens a new window.
-- **Links from other apps** go through `xdg-open`, so they reach the picker with the URL.
+- **Links from other apps** reach it through `xdg-open`. Your choice opens the link.
+- **Super+Shift+Return or Super+Shift+B** runs Omarchy's `omarchy-launch-browser`, which starts the default browser. Your choice opens a new window.
 
-![The picker over a browser window, asking where a new window should open](docs/picker-new-window.webp)
+![The picker asking which profile should open a github.com link](docs/picker-link.webp)
 
-Keys:
+| Key | Action |
+| --- | --- |
+| A row's letter, or `1`–`9` | Choose that row |
+| Up/Down, Tab, or `j`/`k` | Move the highlight |
+| Enter | Choose the highlighted row |
+| Esc, or a click outside | Cancel |
 
-- **A letter or `1`–`9`** chooses directly. Each row shows its letter.
-- **Up/Down, Tab or `j`/`k`, then Enter** moves and chooses.
-- **Esc or a click outside** cancels.
+**The highlight starts on your last choice** since the shell started.
 
-**The highlight starts on the last choice** you made since the shell started.
+**Super+Shift+Alt+B** is Omarchy's private-browser key. It skips the picker and opens the Private choice.
 
-**Super+Shift+Alt+B** (Omarchy's private-browser key) skips the picker and opens the Private choice.
-
-**If the shell can't show the picker, the link opens in Chromium anyway.** The fallback runs when the shell isn't running or doesn't reply within 3 seconds. Chromium then uses its last profile.
+**If the shell can't show the picker, the link still opens.** This happens when the shell isn't running or doesn't reply within 3 seconds. Chromium then opens the link in its last-used profile.
 
 The command also works on its own:
 
-```text
-browser-picker [URL]              show the picker
-browser-picker --open ID [URL]    open in the choice with this id
-browser-picker --private [URL]    open the private choice without asking
-browser-picker --list             print the choices as JSON
-```
+| Command | What it does |
+| --- | --- |
+| `browser-picker [URL]` | Show the picker |
+| `browser-picker --open ID [URL]` | Open in the choice with this id, without asking |
+| `browser-picker --private [URL]` | Open the private choice, without asking |
+| `browser-picker --list` | Print the choices and their ids as JSON |
 
-## Choosing profiles
+### Limits
 
-**With no config file, the picker lists your Chromium profiles.** It reads them from `~/.config/chromium/Local State`, in Chromium's own order and with the names Chromium shows. It adds **Private** at the end, which opens an incognito window in your last-used profile.
+- **Links clicked inside Chromium stay in Chromium.** This includes Chromium web apps, such as Slack.
+- **Omarchy's web-app launcher is unaffected.** It falls back to `chromium.desktop` when the default browser isn't a Chromium build it knows.
+- **Chromium may offer to become the default browser again** when something else starts it. Choose **Don't ask again**.
 
-Run `browser-picker --list` to see the choices and their ids.
+## Configuration
 
-**To pick your own labels, order, keys or icons,** create `~/.config/browser-picker/profiles.json`. When this file lists any choices, the picker shows only those. [`profiles.example.json`](profiles.example.json) is a starting point:
+**With no config file, the picker lists your Chromium profiles.** It reads them from `~/.config/chromium/Local State`, with the names and order Chromium uses. It adds **Private** at the end. Private opens an incognito window in your last-used profile.
+
+To choose your own labels, order, keys or icons, create `~/.config/browser-picker/profiles.json`. **When that file lists any choices, the picker shows only those.** Start from [`profiles.example.json`](profiles.example.json):
 
 ```json
 {
@@ -83,52 +133,56 @@ Run `browser-picker --list` to see the choices and their ids.
 }
 ```
 
-**`profile` is the folder name inside Chromium's data folder,** such as `Default` or `Profile 1`. It isn't the name Chromium shows. To find it, open `chrome://version` in that profile and read the last part of **Profile Path**.
+**`profile` is the profile's folder name,** such as `Default` or `Profile 1`. It isn't the name Chromium shows. To find it, open `chrome://version` in that profile. The folder name is the last part of **Profile Path**.
 
-Each choice takes these fields. Only `label` is required.
+Each choice accepts these fields. Only `label` is required.
 
 | Field | Default | What it does |
-|---|---|---|
-| `label` | | The text in the picker. |
-| `profile` | Chromium's last-used profile | Passed as `--profile-directory`. |
-| `incognito` | `false` | Adds `--incognito`. The first incognito choice is the one `--private` opens. |
-| `key` | The label's first letter, if it's free | The shortcut key shown on the row. |
-| `icon` | A Chromium or incognito glyph | An SVG or PNG path. `~` means your home folder. A missing file shows the glyph. |
-| `glyph` | | A Nerd Font character to use instead of the default glyph. |
-| `id` | The label in lower case, with dashes for spaces | The name for `--open`. |
+| --- | --- | --- |
+| `label` | | The text in the picker |
+| `profile` | Chromium's last-used profile | Passed to Chromium as `--profile-directory` |
+| `incognito` | `false` | Adds `--incognito`. `--private` opens the first incognito choice. |
+| `key` | The label's first letter, if it's free | The shortcut shown on the row |
+| `icon` | A Chromium or incognito glyph | An SVG or PNG file. `~` means your home folder. A missing file shows the glyph. |
+| `glyph` | | A Nerd Font character to show instead of the default glyph |
+| `id` | The label in lower case, with dashes for spaces | The name `--open` uses |
 
 Two top-level settings change the browser:
 
-- **`browser`** is the command to run. Default: `/usr/bin/chromium`.
-- **`userDataDir`** is where `Local State` is read from. Default: `~/.config/chromium`.
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `browser` | `/usr/bin/chromium` | The browser command to run |
+| `userDataDir` | `~/.config/chromium` | Where the picker reads `Local State` |
 
-**Changes apply to the next window or link.** Nothing needs reinstalling.
-
-## How it works
-
-| Piece | Job |
-|---|---|
-| `browser-picker` | Works out the choices, summons the overlay and starts Chromium. It is the only file that knows Chromium's flags. |
-| `manifest.json`, `Picker.qml` | The overlay. It shows the choices it is given and runs `browser-picker --open <id> [URL]`. It uses the Omarchy menu's theme colours. |
-| `browser-picker.desktop` | The default-browser entry for `http`, `https` and HTML files. |
-| `install`, `uninstall` | Set up or remove everything above. |
-
-The overlay runs inside the long-lived `omarchy-shell` process, like the emoji picker and the Omarchy menu. It appears without starting a new program.
-
-## Limits
-
-- **Links clicked inside Chromium stay in Chromium.** This includes Chromium web apps such as Slack.
-- **Omarchy's web-app launcher is unaffected.** It falls back to `chromium.desktop` when the default browser isn't a known Chromium build.
-- **Chromium started some other way may offer to become the default browser again.** Choose **Don't ask again**.
+**Changes apply to the next link or window.** Nothing needs reinstalling.
 
 ## Development
 
 ```bash
-./tests/run
-omarchy plugin validate .
+make check
 ```
 
-`tests/run` checks the plugin manifest, the choices, the Chromium arguments, the fallback, and both install routes. It uses a temporary home folder and stubs for `systemd-run`, `omarchy-shell` and `xdg-settings`, so it never touches your desktop.
+`make check` runs `tests/run`. The tests check the plugin manifest, the choices, Chromium's arguments, the fallback and `make install`. They use a temporary home folder and stand-ins for `systemd-run` and `omarchy-shell`, so they don't touch your desktop.
+
+`make install` and `make uninstall` accept `PREFIX` (default `~/.local`) and `DESTDIR`.
+
+To try overlay changes, commit them, then add your clone as the plugin:
+
+```bash
+omarchy plugin remove kierangraham.browser-picker
+omarchy plugin add ~/path/to/browser-profile-picker --enable
+```
+
+The pieces:
+
+| File | Job |
+| --- | --- |
+| `browser-picker` | Works out the choices, opens the overlay and starts Chromium. It is the only file that knows Chromium's flags. |
+| `manifest.json`, `Picker.qml` | The overlay. It shows the choices it receives and runs `browser-picker --open <id> [URL]`. It uses the Omarchy menu's theme colours. |
+| `browser-picker.desktop` | The default-browser entry for `http`, `https` and HTML files |
+| `packaging/arch/PKGBUILD` | The Arch package for the command and desktop entry |
+
+The overlay runs inside the long-lived `omarchy-shell` process, like Omarchy's emoji picker and menu. It appears without starting a new program.
 
 ## Licence
 
