@@ -5,6 +5,7 @@
 #   browser-picker --open ID [URL]    open in the choice with this id
 #   browser-picker --private [URL]    open the private choice without asking
 #   browser-picker --list             print the choices as JSON
+#   browser-picker --version          print the version
 #
 # The choices come from ~/.config/browser-picker/profiles.json if it lists any.
 # Otherwise they are the profiles in Chromium's Local State file, plus Private.
@@ -93,9 +94,14 @@ open_choice() {
   launch "${args[@]}" "$@"
 }
 
+version=0.1.0
+
 case ${1:-} in
+  --version)
+    echo "browser-picker $version"
+    ;;
   -h | --help)
-    sed -n '2,13s/^# \{0,1\}//p' "$0"
+    sed -n '2,14s/^# \{0,1\}//p' "$0"
     ;;
   --list)
     choices | jq .
@@ -119,7 +125,8 @@ case ${1:-} in
   *)
     url=${1:-}
     options=$(choices | jq -c 'map({id, label, key, icon, glyph} | with_entries(select(.value != null)))')
-    payload=$(jq -nc --arg url "$url" --argjson options "$options" '{url: $url, options: $options}')
+    payload=$(jq -nc --arg command "$(readlink -f "$0")" --arg url "$url" --argjson options "$options" \
+      '{command: $command, url: $url, options: $options}')
     # The shell answers "ok" when the overlay opened; anything else and Chromium decides.
     if [[ $(timeout 3 omarchy-shell shell summon kierangraham.browser-picker "$payload" 2>/dev/null) != ok ]]; then
       launch ${url:+"$url"}

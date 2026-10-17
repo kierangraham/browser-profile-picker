@@ -1,0 +1,28 @@
+# Maintainer: Kieran Graham <me@kierangraham.com>
+#
+# Installs the browser-picker command and its desktop entry. The overlay is an
+# Omarchy shell plugin, which Omarchy manages itself; install it with:
+#   omarchy plugin add https://github.com/kierangraham/browser-profile-picker --enable
+
+pkgname=browser-profile-picker
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Omarchy overlay that asks which Chromium profile opens each new window and link'
+arch=('any')
+url='https://github.com/kierangraham/browser-profile-picker'
+license=('MIT')
+depends=('bash' 'coreutils' 'jq' 'sed' 'systemd' 'uwsm')
+makedepends=('make')
+optdepends=(
+  'chromium: the browser it opens by default'
+  'xdg-utils: to make it the default web browser'
+)
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+# Update with `updpkgsums` once the v0.1.0 tag is published.
+sha256sums=('SKIP')
+
+package() {
+  cd "$pkgname-$pkgver"
+  make install DESTDIR="$pkgdir" PREFIX=/usr
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

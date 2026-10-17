@@ -4,7 +4,7 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 
-// Summoned by `browser-picker` with {"url": "...", "options": [{id, label, key, icon, glyph}]}.
+// Summoned by `browser-picker` with {"command": "...", "url": "...", "options": [{id, label, key, icon, glyph}]}.
 // An icon that is missing or fails to load falls back to the glyph.
 // Choosing runs `browser-picker --open <id> [url]`; the picker knows nothing about browsers.
 Item {
@@ -13,7 +13,8 @@ Item {
   property var shell: null
   property var manifest: null
 
-  readonly property string command: Quickshell.env("HOME") + "/.local/bin/browser-picker"
+  // The script sends its own path; a bare name falls back to PATH.
+  property string command: "browser-picker"
   property bool opened: false
   property string url: ""
   property var options: []
@@ -36,6 +37,7 @@ Item {
     try { payload = JSON.parse(payloadJson || "{}") } catch (e) {}
     root.url = String(payload.url || "")
     root.options = Array.isArray(payload.options) ? payload.options : []
+    root.command = String(payload.command || "browser-picker")
     // Start on the last profile chosen in this session.
     root.selectedIndex = Math.max(0, root.options.findIndex(function(o) { return o.id === root.lastChoice }))
     root.opened = true

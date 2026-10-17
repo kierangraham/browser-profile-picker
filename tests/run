@@ -1,5 +1,5 @@
 #!/bin/bash
-# Checks the plugin, the choices and the install scripts without touching your
+# Checks the plugin, the choices and make install without touching your
 # desktop: HOME is a temporary folder and the desktop commands are stubs.
 set -euo pipefail
 
@@ -20,7 +20,8 @@ check() {
 }
 
 check "plugin validates" omarchy plugin validate "$repo"
-check "scripts parse" bash -n "$repo/browser-picker" "$repo/install" "$repo/uninstall"
+check "the script parses" bash -n "$repo/browser-picker"
+check "the versions match" test "$("$repo/browser-picker" --version)" = "browser-picker $(jq -r .version "$repo/manifest.json")"
 
 # Stubs: record what would run instead of running it.
 stubs=$tmp/stubs
@@ -33,16 +34,6 @@ cat >"$stubs/omarchy-shell" <<'EOF'
 #!/bin/bash
 [[ ${2:-} == summon ]] && { printf "%s" "${4:-}" >"$HOME/summoned"; echo "${STUB_SHELL_REPLY:-ok}"; }
 exit 0
-EOF
-cat >"$stubs/omarchy" <<'EOF'
-#!/bin/bash
-[[ $1 == plugin && $2 == validate ]] && exec omarchy-plugin-validate "$3"
-echo "$*" >>"$HOME/omarchy-calls"
-EOF
-cat >"$stubs/xdg-settings" <<'EOF'
-#!/bin/bash
-f=$HOME/default-browser
-if [[ $1 == set ]]; then echo "$3" >"$f"; else cat "$f" 2>/dev/null || echo chromium.desktop; fi
 EOF
 printf '#!/bin/bash\n' >"$stubs/update-desktop-database"
 chmod +x "$stubs"/*
@@ -83,33 +74,32 @@ check "--private uses the configured profile" \
   test "$(tail -2 "$HOME/launched" | paste -sd' ')" = "--profile-directory=Profile 1 --incognito"
 
 "$picker" https://example.com/page
-check "the picker is summoned with the URL" \
-  test "$(jq -r '.url, (.options | length)' "$HOME/summoned" | paste -sd' ')" = "https://example.com/page 2"
+check "the picker is summoned with the URL and the command's path" \
+  test "$(jq -r '.url, (.options | length), .command' "$HOME/summoned" | paste -sd' ')" \
+  = "https://example.com/page 2 $repo/browser-picker"
 
 rm -f "$HOME/launched"
 STUB_SHELL_REPLY=busy "$picker" https://example.com/fallback
 check "without the shell the link still opens" test "$(tail -1 "$HOME/launched")" = "https://example.com/fallback"
 rm "$HOME/.config/browser-picker/profiles.json"
 
-"$repo/install" >/dev/null
-plugin=$HOME/.config/omarchy/plugins/kierangraham.browser-picker
-check "install copies the plugin" omarchy plugin validate "$plugin"
-check "install sets the default browser" test "$(xdg-settings get default-web-browser)" = browser-picker.desktop
-check "the desktop file runs the installed script" \
+# make install, as a user (PREFIX defaults to ~/.local) and as a package.
+make -s -C "$repo" install >/dev/null
+check "make install puts the command in ~/.local/bin" test -x "$HOME/.local/bin/browser-picker"
+check "the desktop entry runs the installed command" \
   grep -qx "Exec=$HOME/.local/bin/browser-picker %u" "$HOME/.local/share/applications/browser-picker.desktop"
+make -s -C "$repo" uninstall >/dev/null
+check "make uninstall removes both" \
+  test ! -e "$HOME/.local/bin/browser-picker" -a ! -e "$HOME/.local/share/applications/browser-picker.desktop"
 
-"$repo/uninstall" >/dev/null
-check "uninstall restores the default browser" test "$(xdg-settings get default-web-browser)" = chromium.desktop
-check "uninstall removes the plugin and script" test ! -e "$plugin" -a ! -e "$HOME/.local/bin/browser-picker"
-
-# The `omarchy plugin add` route: the checkout is the plugin folder.
-mkdir -p "$plugin"
-tar -C "$repo" --exclude=.git -cf - . | tar -C "$plugin" -xf -
-git -C "$plugin" init -q
-"$plugin/install" >/dev/null
-check "install from the plugin folder" test -x "$HOME/.local/bin/browser-picker" -a -d "$plugin/.git"
-"$plugin/uninstall" >/dev/null
-check "uninstall from the plugin folder" test ! -e "$plugin"
+pkg=$tmp/pkg
+make -s -C "$repo" install DESTDIR="$pkg" PREFIX=/usr >/dev/null
+check "make install honours DESTDIR and PREFIX" \
+  test "$(cd "$pkg" && find . -type f | sort | paste -sd' ')" \
+  = "./usr/bin/browser-picker ./usr/share/applications/browser-picker.desktop"
+check "the packaged desktop entry runs /usr/bin/browser-picker" \
+  grep -qx "Exec=/usr/bin/browser-picker %u" "$pkg/usr/share/applications/browser-picker.desktop"
+check "the desktop entry is valid" desktop-file-validate "$pkg/usr/share/applications/browser-picker.desktop"
 
 ((failures == 0)) || { echo "$failures failed"; exit 1; }
 echo "All checks passed."
